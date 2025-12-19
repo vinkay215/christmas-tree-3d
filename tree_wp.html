@@ -101,6 +101,90 @@
 
         #file-input { display: none; }
 
+        /* Thông báo yêu cầu quyền camera */
+        #camera-permission-banner {
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: linear-gradient(135deg, rgba(20, 20, 20, 0.95) 0%, rgba(30, 30, 30, 0.95) 100%);
+            border: 1px solid rgba(212, 175, 55, 0.5);
+            border-radius: 15px;
+            padding: 20px 30px;
+            z-index: 200;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5), 0 0 30px rgba(212, 175, 55, 0.3);
+            backdrop-filter: blur(10px);
+            transition: all 0.5s ease;
+            max-width: 500px;
+            opacity: 0;
+            pointer-events: none;
+        }
+        
+        #camera-permission-banner.show {
+            opacity: 1;
+            pointer-events: auto;
+            transform: translateX(-50%) translateY(0);
+        }
+        
+        #camera-permission-banner.hide {
+            opacity: 0;
+            transform: translateX(-50%) translateY(20px);
+            pointer-events: none;
+        }
+        
+        .camera-icon {
+            font-size: 32px;
+            color: #d4af37;
+            animation: pulse 2s ease-in-out infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.1); opacity: 0.8; }
+        }
+        
+        .camera-message {
+            flex: 1;
+            color: #fceea7;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+        
+        .camera-message strong {
+            color: #d4af37;
+            display: block;
+            margin-bottom: 5px;
+            font-size: 15px;
+        }
+        
+        .camera-btn {
+            background: linear-gradient(135deg, #d4af37 0%, #ffd966 100%);
+            color: #000;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(212, 175, 55, 0.4);
+        }
+        
+        .camera-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(212, 175, 55, 0.6);
+            background: linear-gradient(135deg, #ffd966 0%, #d4af37 100%);
+        }
+        
+        .camera-btn:active {
+            transform: translateY(0);
+        }
+
         /* Hiển thị webcam - Góc dưới bên trái */
         #webcam-wrapper {
             position: absolute; 
@@ -165,6 +249,16 @@
     <div id="webcam-wrapper">
         <video id="webcam" autoplay playsinline></video>
         <canvas id="webcam-preview" style="display:none;"></canvas>
+    </div>
+
+    <!-- Thông báo yêu cầu quyền camera -->
+    <div id="camera-permission-banner">
+        <div class="camera-icon">📷</div>
+        <div class="camera-message">
+            <strong>Yêu cầu quyền Camera</strong>
+            <span>Để sử dụng điều khiển cử chỉ tay AI, vui lòng cho phép truy cập camera</span>
+        </div>
+        <button class="camera-btn" id="request-camera-btn">Cho phép</button>
     </div>
 
     <script type="module">
@@ -552,6 +646,65 @@
         }
 
         // ============================================
+        // KIỂM TRA VÀ XỬ LÝ QUYỀN CAMERA
+        // ============================================
+        async function checkCameraPermission() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                return false;
+            }
+            
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                stream.getTracks().forEach(track => track.stop());
+                hideCameraBanner();
+                return true;
+            } catch (error) {
+                showCameraBanner();
+                return false;
+            }
+        }
+        
+        function showCameraBanner() {
+            const banner = document.getElementById('camera-permission-banner');
+            if (banner) {
+                banner.classList.remove('hide');
+                banner.classList.add('show');
+            }
+        }
+        
+        function hideCameraBanner() {
+            const banner = document.getElementById('camera-permission-banner');
+            if (banner) {
+                banner.classList.remove('show');
+                banner.classList.add('hide');
+                setTimeout(() => {
+                    banner.style.display = 'none';
+                }, 500);
+            }
+        }
+        
+        async function requestCameraPermission() {
+            if (!navigator.mediaDevices?.getUserMedia) {
+                alert('Trình duyệt của bạn không hỗ trợ camera');
+                return;
+            }
+            
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                hideCameraBanner();
+                if (!handLandmarker) {
+                    await initMediaPipe();
+                } else {
+                    video.srcObject = stream;
+                    video.addEventListener("loadeddata", predictWebcam);
+                }
+            } catch (error) {
+                console.error('Lỗi khi yêu cầu quyền camera:', error);
+                alert('Không thể truy cập camera. Vui lòng kiểm tra cài đặt quyền của trình duyệt.');
+            }
+        }
+
+        // ============================================
         // KHỞI TẠO MEDIAPIPE - Nhận diện cử chỉ tay
         // ============================================
         async function initMediaPipe() {
@@ -574,10 +727,16 @@
                 numHands: 1
             });
             
-            if (navigator.mediaDevices?.getUserMedia) {
-                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-                video.srcObject = stream;
-                video.addEventListener("loadeddata", predictWebcam);
+            const hasPermission = await checkCameraPermission();
+            if (hasPermission && navigator.mediaDevices?.getUserMedia) {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                    video.srcObject = stream;
+                    video.addEventListener("loadeddata", predictWebcam);
+                } catch (error) {
+                    console.error('Lỗi khi truy cập camera:', error);
+                    showCameraBanner();
+                }
             }
         }
 
@@ -633,6 +792,17 @@
                 composer.setSize(window.innerWidth, window.innerHeight);
             });
             document.getElementById('file-input').addEventListener('change', handleImageUpload);
+            
+            // Event listener cho nút yêu cầu quyền camera
+            const requestBtn = document.getElementById('request-camera-btn');
+            if (requestBtn) {
+                requestBtn.addEventListener('click', requestCameraPermission);
+            }
+            
+            // Kiểm tra quyền camera khi trang load
+            setTimeout(async () => {
+                await checkCameraPermission();
+            }, 1000);
             
             window.addEventListener('keydown', (e) => {
                 if (e.key.toLowerCase() === 'h') {
